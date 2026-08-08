@@ -1,0 +1,60 @@
+{
+  "name": "@logicflow/vue-node-registry",
+  "version": "1.2.5",
+  "description": "LogicFlow Vue Component Node Registry",
+  "main": "lib/index.js",
+  "module": "es/index.js",
+  "unpkg": "dist/index.min.js",
+  "jsdelivr": "dist/index.min.js",
+  "types": "lib/index.d.ts",
+  "keywords": [
+    "@logicflow/vue-node-registry",
+    "LogicFlow",
+    "Vue",
+    "Node"
+  ],
+  "scripts": {
+    "clean:turbo": "rss",
+    "clean:build": "rss",
+    "clean": "rss",
+    "build:less": "rss",
+    "build:esm": "tsc --module esnext --target es5 --outDir ./es",
+    "build:cjs": "tsc --module commonjs --target es5 --outDir ./lib",
+    "build:umd": "rollup -c ./rollup.config.js --bundleConfigAsCjs",
+    "dev": "rss",
+    "dev:esm": "rss",
+    "dev:cjs": "rss",
+    "build": "rss",
+    "build:all": "rss",
+    "prebuild": "rss",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "vue-demi": "latest",
+    "lodash-es": "^4.17.21"
+  },
+  "peerDependencies": {
+    "@logicflow/core": "workspace:^",
+    "@vue/composition-api": "^1.0.0-rc.10",
+    "vue": "^2.0.0 || >=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@vue/composition-api": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@logicflow/core": "workspace:*",
+    "vue": "^3.0.0"
+  },
+  "files": [
+    "dist",
+    "es",
+    "lib"
+  ],
+  "author": {
+    "name": "boyongjiong",
+    "email": "boyongjiong@gmail.com"
+  },
+  "license": "Apache-2.0"
+}

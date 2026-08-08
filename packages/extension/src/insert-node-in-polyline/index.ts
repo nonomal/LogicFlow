@@ -1,45 +1,53 @@
-import LogicFlow, { PolylineEdgeModel, EventType, formateAnchorConnectValidateData } from '@logicflow/core';
-import type { ConnectRuleResult } from '@logicflow/core/types';
-import { cloneDeep } from 'lodash-es';
-import { isNodeInSegment } from './edge';
+import LogicFlow, {
+  BaseNodeModel,
+  PolylineEdgeModel,
+  EventType,
+  formatAnchorConnectValidateData,
+  getClosestAnchor,
+} from '@logicflow/core'
+import { cloneDeep } from 'lodash-es'
+import { isNodeInSegment } from './edge'
 
-class InsertNodeInPolyline {
-  static pluginName = 'insertNodeInPolyline';
-  _lf: LogicFlow;
-  dndAdd: boolean; // dnd 添加节点到折线上的开关
-  dropAdd: boolean; // 移动节点到折线上的开关
-  deviation: number; // 节点中心距离直接距离小于该值时，认为节点在折线上
+import NodeData = LogicFlow.NodeData
+
+export class InsertNodeInPolyline {
+  static pluginName = 'insertNodeInPolyline'
+  _lf: LogicFlow
+  dndAdd: boolean // dnd 添加节点到折线上的开关
+  dropAdd: boolean // 移动节点到折线上的开关
+  deviation: number // 节点中心距离直接距离小于该值时，认为节点在折线上
   constructor({ lf }) {
-    this._lf = lf;
+    this._lf = lf
     // fix https://github.com/didi/LogicFlow/issues/754
-    this.deviation = 20;
-    this.dndAdd = true;
-    this.dropAdd = true;
-    this.eventHandler();
+    this.deviation = 20
+    this.dndAdd = true
+    this.dropAdd = true
+    this.eventHandler()
   }
+
   eventHandler() {
     // 监听事件
     if (this.dndAdd) {
-      this._lf.on('node:dnd-add', ({ data }) => {
-        this.insetNode(data);
-      });
+      this._lf.on('node:dnd-add', ({ data }: { data: NodeData }) => {
+        this.insetNode(data)
+      })
     }
     if (this.dropAdd) {
-      this._lf.on('node:drop', ({ data }) => {
-        const { edges } = this._lf.graphModel;
-        const { id } = data;
+      this._lf.on('node:drop', ({ data }: { data: NodeData }) => {
+        const { edges } = this._lf.graphModel
+        const { id } = data
         // 只有游离节点才能插入到连线上
-        let pureNode = true;
+        let pureNode = true
         for (let i = 0; i < edges.length; i++) {
           if (edges[i].sourceNodeId === id || edges[i].targetNodeId === id) {
-            pureNode = false;
-            break;
+            pureNode = false
+            break
           }
         }
         if (pureNode) {
-          this.insetNode(data);
+          this.insetNode(data)
         }
-      });
+      })
     }
   }
 
@@ -53,71 +61,66 @@ class InsertNodeInPolyline {
    */
   // fix: https://github.com/didi/LogicFlow/issues/1078
   checkRuleBeforeInsetNode(
-    sourceNodeId,
-    targetNodeId,
-    sourceAnchorId,
-    targetAnchorId,
-    nodeData,
+    sourceNodeId: string,
+    targetNodeId: string,
+    sourceAnchorId: string,
+    targetAnchorId: string,
+    nodeData: NodeData,
   ) {
-    const sourceNodeModel = this._lf.getNodeModelById(sourceNodeId);
-    const targetNodeModel = this._lf.getNodeModelById(targetNodeId);
+    const sourceNodeModel = this._lf.getNodeModelById(sourceNodeId)!
+    const targetNodeModel = this._lf.getNodeModelById(targetNodeId)!
 
-    const sourceAnchorInfo = sourceNodeModel.getAnchorInfo(sourceAnchorId);
-    const targetAnchorInfo = targetNodeModel.getAnchorInfo(targetAnchorId);
+    const sourceAnchorInfo = sourceNodeModel.getAnchorInfo(sourceAnchorId)!
+    const targetAnchorInfo = targetNodeModel.getAnchorInfo(targetAnchorId)!
 
-    const sourceRuleResultData:
-    Boolean | ConnectRuleResult = sourceNodeModel.isAllowConnectedAsSource(
-      nodeData,
+    // TODO: nodeData 与 isAllowConnectedAsSource 方法需要的类型 BaseNodeModel 不一致，少了 target 属性等，需要验证是否可用。
+    const sourceRuleResultData = sourceNodeModel.isAllowConnectedAsSource(
+      nodeData as BaseNodeModel,
       sourceAnchorInfo,
       targetAnchorInfo,
-    );
-    const targetRuleResultData:
-    Boolean | ConnectRuleResult = targetNodeModel.isAllowConnectedAsTarget(
-      nodeData,
+    )
+    const targetRuleResultData = targetNodeModel.isAllowConnectedAsTarget(
+      nodeData as BaseNodeModel,
       sourceAnchorInfo,
       targetAnchorInfo,
-    );
+    )
 
-    const {
-      isAllPass: isSourcePass,
-      msg: sourceMsg,
-    } = formateAnchorConnectValidateData(sourceRuleResultData);
-    const {
-      isAllPass: isTargetPass,
-      msg: targetMsg,
-    } = formateAnchorConnectValidateData(targetRuleResultData);
+    const { isAllPass: isSourcePass, msg: sourceMsg } =
+      formatAnchorConnectValidateData(sourceRuleResultData)
+    const { isAllPass: isTargetPass, msg: targetMsg } =
+      formatAnchorConnectValidateData(targetRuleResultData)
 
     return {
       isPass: isSourcePass && isTargetPass,
       sourceMsg,
       targetMsg,
-    };
+    }
   }
 
-  insetNode(nodeData): void {
-    const { edges } = this._lf.graphModel;
-    const nodeModel = this._lf.getNodeModelById(nodeData.id);
+  insetNode(nodeData: NodeData): void {
+    const { edges } = this._lf.graphModel
+    const nodeModel = this._lf.getNodeModelById(nodeData.id)
 
     // fix: https://github.com/didi/LogicFlow/issues/1077
     // 参照https://github.com/didi/LogicFlow/issues/454=>当getDefaultAnchor(){return []}表示：不显示锚点，也不允许其他节点连接到此节点
     // 当getDefaultAnchor=[]，直接阻止下面进行edges的截断插入node相关逻辑
-    const anchorArray = nodeModel.getDefaultAnchor();
-    const isNotAllowConnect = !anchorArray || anchorArray.length === 0;
+    const anchorArray = nodeModel?.getDefaultAnchor()
+    const isNotAllowConnect = !anchorArray || anchorArray.length === 0
     if (isNotAllowConnect) {
       this._lf.graphModel.eventCenter.emit(EventType.CONNECTION_NOT_ALLOWED, {
         data: nodeData,
         msg: '自定义类型节点不显示锚点，也不允许其他节点连接到此节点',
-      });
-      return;
+      })
+      return
     }
 
+    if (!nodeModel) return
     for (let i = 0; i < edges.length; i++) {
-      // eslint-disable-next-line max-len
       const { crossIndex, crossPoints } = isNodeInSegment(
         nodeModel,
         edges[i] as PolylineEdgeModel,
         this.deviation,
-      );
+      )
       if (crossIndex >= 0) {
         const {
           sourceNodeId,
@@ -127,40 +130,45 @@ class InsertNodeInPolyline {
           pointsList,
           sourceAnchorId,
           targetAnchorId,
-        } = edges[i];
-          // fix https://github.com/didi/LogicFlow/issues/996
-        const startPoint = cloneDeep(pointsList[0]);
-        const endPoint = cloneDeep(crossPoints.startCrossPoint);
-        this._lf.deleteEdge(id);
+        } = edges[i]
+        // fix https://github.com/didi/LogicFlow/issues/996
+        const startPoint = cloneDeep(pointsList[0])
+        this._lf.deleteEdge(id)
         const checkResult = this.checkRuleBeforeInsetNode(
           sourceNodeId,
           targetNodeId,
-          sourceAnchorId,
-          targetAnchorId,
+          sourceAnchorId!,
+          targetAnchorId!,
           nodeData,
-        );
+        )
+        // 基于插入节点的进入交点计算出最近的“进入锚点”，用于重连原边的前半段
+        const entryAnchorInfo = getClosestAnchor(
+          crossPoints.startCrossPoint,
+          nodeModel,
+        )
+        const entryAnchor = entryAnchorInfo.anchor
+        // 构造第一条边：原 source → 插入节点（终点为进入锚点）
         this._lf.addEdge({
           type,
           sourceNodeId,
           targetNodeId: nodeData.id,
           startPoint,
-          endPoint,
-          pointsList: [
-            ...pointsList.slice(0, crossIndex),
-            crossPoints.startCrossPoint,
-          ],
-        });
+          endPoint: entryAnchor,
+        })
+        // 基于插入节点的离开交点计算出最近的“离开锚点”，用于重连原边的后半段
+        const exitAnchorInfo = getClosestAnchor(
+          crossPoints.endCrossPoint,
+          nodeModel,
+        )
+        const exitAnchor = exitAnchorInfo.anchor
+        // 构造第二条边：插入节点 → 原 target（起点为离开锚点）
         this._lf.addEdge({
           type,
           sourceNodeId: nodeData.id,
           targetNodeId,
-          startPoint: cloneDeep(crossPoints.endCrossPoint),
+          startPoint: cloneDeep(exitAnchor),
           endPoint: cloneDeep(pointsList[pointsList.length - 1]),
-          pointsList: [
-            crossPoints.endCrossPoint,
-            ...pointsList.slice(crossIndex),
-          ],
-        });
+        })
         if (!checkResult.isPass) {
           this._lf.graphModel.eventCenter.emit(
             EventType.CONNECTION_NOT_ALLOWED,
@@ -168,20 +176,18 @@ class InsertNodeInPolyline {
               data: nodeData,
               msg: checkResult.targetMsg || checkResult.sourceMsg,
             },
-          );
+          )
           // FIXME:在关闭了历史记录的情况下，撤销操作会不生效。
           setTimeout(() => {
-            this._lf.undo();
-          }, 200);
-          break;
+            this._lf.undo()
+          }, 200)
+          break
         } else {
-          break;
+          break
         }
       }
     }
   }
 }
 
-export { InsertNodeInPolyline };
-
-export default InsertNodeInPolyline;
+export default InsertNodeInPolyline

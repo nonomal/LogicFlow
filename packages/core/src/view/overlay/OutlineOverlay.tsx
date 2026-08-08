@@ -1,147 +1,148 @@
-import { Component, h } from 'preact';
-import { ElementType, ModelType } from '../../constant/constant';
-import { BaseNodeModel, LineEdgeModel } from '../../model';
-import BezierEdgeModel from '../../model/edge/BezierEdgeModel';
-import PolylineEdgeModel from '../../model/edge/PolylineEdgeModel';
-import GraphModel from '../../model/GraphModel';
-import { points2PointsList, getBezierPoints, getBBoxOfPoints } from '../../util/edge';
-import Rect from '../basic-shape/Rect';
-import { observer } from '../..';
+import { Component } from 'preact/compat'
+import { Rect } from '../shape'
+import { observer } from '../..'
+import { ModelType } from '../../constant'
+import {
+  GraphModel,
+  LineEdgeModel,
+  BezierEdgeModel,
+  PolylineEdgeModel,
+} from '../../model'
+import { points2PointsList, getBezierPoints, getBBoxOfPoints } from '../../util'
 
 type IProps = {
-  graphModel: GraphModel;
-};
+  graphModel: GraphModel
+}
 
 @observer
-export default class OutlineOverlay extends Component<IProps> {
+export class OutlineOverlay extends Component<IProps> {
+  // 通用渲染函数：根据点集合与样式计算包围盒并返回矩形轮廓
+  private renderRectOutline(
+    pointsList: any[],
+    style: Record<string, unknown>,
+    className: string,
+    defaultOffsets: { widthOffset: number; heightOffset: number },
+  ) {
+    const {
+      widthOffset = defaultOffsets.widthOffset,
+      heightOffset = defaultOffsets.heightOffset,
+    } = (style || {}) as any
+    const { x, y, width, height } = getBBoxOfPoints(
+      pointsList,
+      widthOffset,
+      heightOffset,
+    )
+    return (
+      <Rect className={className} {...{ x, y, width, height }} {...style} />
+    )
+  }
   // 节点outline
   getNodesOutline() {
-    const { graphModel } = this.props;
-    const { nodes, editConfigModel: { hoverOutline, nodeSelectedOutline } } = graphModel;
-    const nodeOutline = [];
-    nodes.forEach(element => {
+    const { graphModel } = this.props
+    const {
+      nodes,
+      editConfigModel: { hoverOutline, nodeSelectedOutline },
+    } = graphModel
+    const nodeOutline: any = []
+    nodes.forEach((element) => {
       if (element.isHovered || element.isSelected) {
-        const {
-          isHovered,
-          isSelected,
-          x,
-          y,
-          width,
-          height,
-        } = element;
-        if ((nodeSelectedOutline && isSelected) || (hoverOutline && isHovered)) {
-          const style = (element as BaseNodeModel).getOutlineStyle();
-          let attributes = {};
+        const { isHovered, isSelected, x, y, width, height } = element
+        if (
+          (nodeSelectedOutline && isSelected) ||
+          (hoverOutline && isHovered)
+        ) {
+          const style = element.getOutlineStyle() || {}
+          let attributes = {}
           Object.keys(style).forEach((key) => {
             if (key !== 'hover') {
-              attributes[key] = style[key];
+              attributes[key] = style[key]
             }
-          });
+          })
           if (isHovered) {
-            const hoverStyle = style.hover;
+            const hoverStyle = style.hover
             attributes = {
               ...attributes,
               ...hoverStyle,
-            };
+            }
           }
           nodeOutline.push(
             <Rect
               transform={element.transform}
               className="lf-outline-node"
               {...{
-                x, y, width: width + 10, height: height + 10,
+                x,
+                y,
+                width: width + 4,
+                height: height + 4,
               }}
-              {
-                ...attributes
-              }
+              {...attributes}
             />,
-          );
+          )
         }
       }
-    });
-    return nodeOutline;
+    })
+    return nodeOutline
   }
+
   // 边的outline
   getEdgeOutline() {
     const {
-      graphModel: { edges: edgeList, editConfigModel: { edgeSelectedOutline, hoverOutline } },
-    } = this.props;
-    const edgeOutline = [];
+      graphModel: {
+        edges: edgeList,
+        editConfigModel: { edgeSelectedOutline, hoverOutline },
+      },
+    } = this.props
+    const edgeOutline: any = []
     for (let i = 0; i < edgeList.length; i++) {
-      const edge = edgeList[i];
-      if ((edgeSelectedOutline && edge.isSelected) || (hoverOutline && edge.isHovered)) {
+      const edge = edgeList[i]
+      if (
+        (edgeSelectedOutline && edge.isSelected) ||
+        (hoverOutline && edge.isHovered)
+      ) {
         if (edge.modelType === ModelType.LINE_EDGE) {
-          edgeOutline.push(this.getLineOutline(edge));
+          edgeOutline.push(this.getLineOutline(edge as LineEdgeModel))
         } else if (edge.modelType === ModelType.POLYLINE_EDGE) {
-          edgeOutline.push(this.getPolylineOutline(edge as PolylineEdgeModel));
+          edgeOutline.push(this.getPolylineOutline(edge as PolylineEdgeModel))
         } else if (edge.modelType === ModelType.BEZIER_EDGE) {
-          edgeOutline.push(this.getBezierOutline(edge as BezierEdgeModel));
+          edgeOutline.push(this.getBezierOutline(edge as BezierEdgeModel))
         }
       }
     }
-    return edgeOutline;
+    return edgeOutline
   }
+
   // 直线outline
   getLineOutline(line: LineEdgeModel) {
-    const { startPoint, endPoint } = line;
-    const x = (startPoint.x + endPoint.x) / 2;
-    const y = (startPoint.y + endPoint.y) / 2;
-    const width = Math.abs(startPoint.x - endPoint.x) + 10;
-    const height = Math.abs(startPoint.y - endPoint.y) + 10;
-    const style = line.getOutlineStyle();
-    return (
-      <Rect
-        className="lf-outline-edge"
-        {...{
-          x, y, width, height,
-        }}
-        {
-          ...style
-        }
-      />
-    );
+    const { startPoint, endPoint } = line
+    const style = line.getOutlineStyle()
+    return this.renderRectOutline(
+      [startPoint, endPoint],
+      style,
+      'lf-outline-edge',
+      { widthOffset: 10, heightOffset: 10 },
+    )
   }
+
   // 折线outline
   getPolylineOutline(polyline: PolylineEdgeModel) {
-    const { points } = polyline;
-    const pointsList = points2PointsList(points);
-    const bbox = getBBoxOfPoints(pointsList, 8);
-    const {
-      x, y, width, height,
-    } = bbox;
-    const style = polyline.getOutlineStyle();
-    return (
-      <Rect
-        className="lf-outline"
-        {...{
-          x, y, width, height,
-        }}
-        {
-          ...style
-        }
-      />
-    );
+    const { points } = polyline
+    const pointsList = points2PointsList(points)
+    const style = polyline.getOutlineStyle()
+    return this.renderRectOutline(pointsList, style, 'lf-outline', {
+      widthOffset: 8,
+      heightOffset: 16,
+    })
   }
+
   // 曲线outline
   getBezierOutline(bezier: BezierEdgeModel) {
-    const { path } = bezier;
-    const pointsList = getBezierPoints(path);
-    const bbox = getBBoxOfPoints(pointsList, 8);
-    const {
-      x, y, width, height,
-    } = bbox;
-    const style = bezier.getOutlineStyle();
-    return (
-      <Rect
-        className="lf-outline"
-        {...{
-          x, y, width, height,
-        }}
-        {
-          ...style
-        }
-      />
-    );
+    const { path } = bezier
+    const pointsList = getBezierPoints(path)
+    const style = bezier.getOutlineStyle()
+    return this.renderRectOutline(pointsList, style, 'lf-outline', {
+      widthOffset: 8,
+      heightOffset: 16,
+    })
   }
 
   render() {
@@ -150,6 +151,8 @@ export default class OutlineOverlay extends Component<IProps> {
         {this.getNodesOutline()}
         {this.getEdgeOutline()}
       </g>
-    );
+    )
   }
 }
+
+export default OutlineOverlay

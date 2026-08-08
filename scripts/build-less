@@ -1,0 +1,95 @@
+#!/usr/bin/env node
+
+const fs = require('node:fs')
+const os = require('node:os')
+const process = require('node:process')
+const path = require('node:path')
+const cp = require('node:child_process')
+const fse = require('fs-extra')
+
+const cwd = process.cwd()
+const es = path.join(cwd, 'es')
+const lib = path.join(cwd, 'lib')
+const src = path.join(cwd, 'src')
+const index = path.join(src, 'index.less')
+const rootIndex = path.resolve(index)
+
+function compile(source, target) {
+  let cmd = '../../node_modules/.bin/lessc'
+  if (os.type() === 'Windows_NT') {
+    cmd = path.join(cwd, `${cmd}.cmd`)
+  }
+  cp.execFileSync(cmd, [source, target], { shell: true })
+}
+
+function toCSSPath(source) {
+  const dir = path.dirname(source)
+  const file = `${path.basename(source, '.less')}.css`
+  return path.join(dir, file)
+}
+
+function walkLessFiles(dir, callback) {
+  const stat = fs.statSync(dir)
+  if (!stat.isDirectory()) {
+    return
+  }
+  for (const file of fs.readdirSync(dir)) {
+    const fullPath = path.join(dir, file)
+    if (fs.statSync(fullPath).isDirectory()) {
+      walkLessFiles(fullPath, callback)
+    } else {
+      callback(fullPath)
+    }
+  }
+}
+
+function processLessFile(filePath) {
+  const ext = path.extname(filePath)
+  if (ext === '.less' || ext === '.css') {
+    fse.copySync(filePath, path.join(es, path.relative(src, filePath)))
+    fse.copySync(filePath, path.join(lib, path.relative(src, filePath)))
+  }
+
+  if (ext !== '.less' || path.resolve(filePath) === rootIndex) {
+    return
+  }
+
+  compile(filePath, toCSSPath(path.join(es, path.relative(src, filePath))))
+  compile(filePath, toCSSPath(path.join(lib, path.relative(src, filePath))))
+}
+
+function makeStyleModule() {
+  const dir = path.join(src, 'style')
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir)
+  }
+  const source = path.join(es, 'index.css')
+  const target = path.join(dir, 'raw.ts')
+  if (!fs.existsSync(source)) {
+    return
+  }
+  const content = fs.readFileSync(source, { encoding: 'utf8' })
+  const prev = fs.existsSync(target)
+    ? fs.readFileSync(target, { encoding: 'utf8' })
+    : null
+  const curr = `/* eslint-disable */
+
+/**
+ * Auto generated file, do not modify it!
+ */
+
+export const content = \`${content}\`
+`
+
+  if (prev !== curr) {
+    fs.writeFileSync(target, curr)
+  }
+}
+
+if (fs.existsSync(index)) {
+  compile(index, path.join(es, 'index.css'))
+  compile(index, path.join(lib, 'index.css'))
+
+  walkLessFiles(src, processLessFile)
+  makeStyleModule()
+}

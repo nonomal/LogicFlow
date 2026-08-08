@@ -1,0 +1,317 @@
+/**
+ * @jest-environment jsdom
+ */
+import type { DynamicGroupNodeModel } from '../../src/dynamic-group'
+import {
+  createDynamicGroupLF,
+  findEdgeBetween,
+  getVirtualEdges,
+  graphWithGatewayDualBranch,
+  graphWithSingleExternalEdge,
+} from './fixtures'
+
+afterEach(() => {
+  document.body.innerHTML = ''
+})
+
+function collapseGroup(
+  lf: ReturnType<typeof createDynamicGroupLF>,
+  groupId: string,
+) {
+  const group = lf.getNodeModelById(groupId) as DynamicGroupNodeModel
+  group.toggleCollapse(true)
+}
+
+function expandGroup(
+  lf: ReturnType<typeof createDynamicGroupLF>,
+  groupId: string,
+) {
+  const group = lf.getNodeModelById(groupId) as DynamicGroupNodeModel
+  group.toggleCollapse(false)
+}
+
+describe('dynamic-group collapse edge (#2395)', () => {
+  test('E1: collapse → delete virtual edge → expand — edge does not resurrect', () => {
+    const lf = createDynamicGroupLF()
+    lf.render(graphWithSingleExternalEdge())
+
+    collapseGroup(lf, 'group_1')
+
+    const virtualEdges = getVirtualEdges(lf)
+    expect(virtualEdges.length).toBe(1)
+
+    lf.deleteEdge(virtualEdges[0].id)
+
+    expandGroup(lf, 'group_1')
+
+    expect(findEdgeBetween(lf, 'outer', 'inner')).toBeUndefined()
+    expect(lf.getEdgeModelById('e_outer_inner')).toBeUndefined()
+  })
+
+  test('E7: gateway dual branch — collapse creates two virtual edges', () => {
+    const lf = createDynamicGroupLF()
+    lf.render(graphWithGatewayDualBranch())
+
+    collapseGroup(lf, 'group_gw')
+
+    const virtualEdges = getVirtualEdges(lf)
+    expect(virtualEdges).toHaveLength(2)
+    virtualEdges.forEach((edge) => {
+      expect(edge.sourceNodeId).toBe('gateway')
+      expect(edge.targetNodeId).toBe('group_gw')
+    })
+    expect(lf.getEdgeModelById('e_gw_a')?.visible).toBe(false)
+    expect(lf.getEdgeModelById('e_gw_b')?.visible).toBe(false)
+  })
+
+  test('E7a: delete one virtual edge — only mapped real edge is removed', () => {
+    const lf = createDynamicGroupLF()
+    lf.render(graphWithGatewayDualBranch())
+
+    collapseGroup(lf, 'group_gw')
+
+    const virtualEdges = getVirtualEdges(lf)
+    const virtualForA = virtualEdges.find((edge) =>
+      edge.id.startsWith('e_gw_a'),
+    )
+    expect(virtualForA).toBeDefined()
+
+    lf.deleteEdge(virtualForA!.id)
+
+    expect(lf.getEdgeModelById('e_gw_a')).toBeUndefined()
+    expect(lf.getEdgeModelById('e_gw_b')).toBeDefined()
+    expect(getVirtualEdges(lf)).toHaveLength(1)
+  })
+
+  test('E7b: after deleting one virtual edge, expand keeps only remaining branch', () => {
+    const lf = createDynamicGroupLF()
+    lf.render(graphWithGatewayDualBranch())
+
+    collapseGroup(lf, 'group_gw')
+
+    const virtualForA = getVirtualEdges(lf).find((edge) =>
+      edge.id.startsWith('e_gw_a'),
+    )
+    lf.deleteEdge(virtualForA!.id)
+
+    expandGroup(lf, 'group_gw')
+
+    expect(findEdgeBetween(lf, 'gateway', 'node_a')).toBeUndefined()
+    expect(lf.getEdgeModelById('e_gw_b')?.visible).toBe(true)
+    expect(findEdgeBetween(lf, 'gateway', 'node_b')).toBeDefined()
+    expect(getVirtualEdges(lf)).toHaveLength(0)
+  })
+
+  test('E7c: delete both virtual edges — expand leaves no external edges', () => {
+    const lf = createDynamicGroupLF()
+    lf.render(graphWithGatewayDualBranch())
+
+    collapseGroup(lf, 'group_gw')
+
+    const virtualEdges = getVirtualEdges(lf)
+    lf.deleteEdge(virtualEdges[0].id)
+    lf.deleteEdge(getVirtualEdges(lf)[0].id)
+
+    expandGroup(lf, 'group_gw')
+
+    expect(findEdgeBetween(lf, 'gateway', 'node_a')).toBeUndefined()
+    expect(findEdgeBetween(lf, 'gateway', 'node_b')).toBeUndefined()
+    expect(lf.getGraphData().edges).toHaveLength(0)
+  })
+
+  test('E9: collapse — virtual edge clears stale anchor ids when retargeting to group', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const lf = createDynamicGroupLF()
+      lf.render(graphWithSingleExternalEdge())
+
+      const realEdge = lf.getEdgeModelById('e_outer_inner')!
+      realEdge.targetAnchorId = 'inner_3'
+
+      collapseGroup(lf, 'group_1')
+
+      const virtualEdges = getVirtualEdges(lf)
+      expect(virtualEdges).toHaveLength(1)
+      expect(virtualEdges[0].targetNodeId).toBe('group_1')
+      expect(virtualEdges[0].targetAnchorId).not.toBe('inner_3')
+
+      const groupAnchorIds = (
+        lf.getNodeModelById('group_1')!.getDefaultAnchor() as Array<{
+          id: string
+        }>
+      ).map((anchor) => anchor.id)
+      if (virtualEdges[0].targetAnchorId) {
+        expect(groupAnchorIds).toContain(virtualEdges[0].targetAnchorId)
+      }
+
+      const anchorWarns = warnSpy.mock.calls.filter(([msg]) =>
+        /未在节点上找到指定的(起点|终点)锚点/.test(String(msg)),
+      )
+      expect(anchorWarns).toHaveLength(0)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  test('E9b: collapse — virtual edge clears source anchor when retargeting to group', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const lf = createDynamicGroupLF()
+      lf.render({
+        nodes: [
+          {
+            id: 'group_out',
+            type: 'dynamic-group',
+            x: 420,
+            y: 220,
+            properties: {
+              width: 360,
+              height: 220,
+              collapsedWidth: 80,
+              collapsedHeight: 60,
+              collapsible: true,
+              isCollapsed: false,
+              children: ['inner_out'],
+            },
+          },
+          { id: 'outer_tgt', type: 'circle', x: 120, y: 220 },
+          {
+            id: 'inner_out',
+            type: 'rect',
+            x: 420,
+            y: 220,
+            properties: { width: 80, height: 50 },
+          },
+        ],
+        edges: [
+          {
+            id: 'e_inner_outer',
+            type: 'polyline',
+            sourceNodeId: 'inner_out',
+            targetNodeId: 'outer_tgt',
+          },
+        ],
+      })
+
+      const realEdge = lf.getEdgeModelById('e_inner_outer')!
+      realEdge.sourceAnchorId = 'inner_out_1'
+
+      collapseGroup(lf, 'group_out')
+
+      const virtualEdges = getVirtualEdges(lf)
+      expect(virtualEdges).toHaveLength(1)
+      expect(virtualEdges[0].sourceNodeId).toBe('group_out')
+      expect(virtualEdges[0].sourceAnchorId).not.toBe('inner_out_1')
+
+      const anchorWarns = warnSpy.mock.calls.filter(([msg]) =>
+        /未在节点上找到指定的(起点|终点)锚点/.test(String(msg)),
+      )
+      expect(anchorWarns).toHaveLength(0)
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  test('C1a: collapse → API delete real edge → virtual edge is removed immediately', () => {
+    const lf = createDynamicGroupLF()
+    lf.render(graphWithSingleExternalEdge())
+
+    collapseGroup(lf, 'group_1')
+    expect(getVirtualEdges(lf)).toHaveLength(1)
+
+    // API 直接删隐藏的真实边（绕过 UI）
+    lf.deleteEdge('e_outer_inner')
+
+    // 真实边与虚拟边都应从图中移除
+    expect(lf.getEdgeModelById('e_outer_inner')).toBeUndefined()
+    expect(getVirtualEdges(lf)).toHaveLength(0)
+    expect(lf.graphModel.edges).toHaveLength(0)
+  })
+
+  test('C1b: collapse → API delete real edge → expand → no edges remain', () => {
+    const lf = createDynamicGroupLF()
+    lf.render(graphWithSingleExternalEdge())
+
+    collapseGroup(lf, 'group_1')
+    lf.deleteEdge('e_outer_inner')
+    expandGroup(lf, 'group_1')
+
+    expect(getVirtualEdges(lf)).toHaveLength(0)
+    expect(lf.getGraphData().edges).toHaveLength(0)
+  })
+
+  test('C1c: collapse → API delete real edge → getGraphData excludes deleted edge', () => {
+    const lf = createDynamicGroupLF()
+    lf.render(graphWithSingleExternalEdge())
+
+    collapseGroup(lf, 'group_1')
+    lf.deleteEdge('e_outer_inner')
+
+    const { edges } = lf.getGraphData()
+    expect(edges).toHaveLength(0)
+  })
+
+  test('E8: collapse → drag group → expand → drag — edge endpoints stay on anchors', () => {
+    const lf = createDynamicGroupLF()
+    lf.render({
+      nodes: [
+        {
+          id: 'group_abc',
+          type: 'dynamic-group',
+          x: 400,
+          y: 200,
+          properties: {
+            width: 320,
+            height: 200,
+            collapsedWidth: 80,
+            collapsedHeight: 60,
+            collapsible: true,
+            isCollapsed: false,
+            children: ['B'],
+          },
+        },
+        { id: 'A', type: 'circle', x: 100, y: 200 },
+        { id: 'B', type: 'rect', x: 400, y: 200 },
+        { id: 'C', type: 'circle', x: 700, y: 200 },
+      ],
+      edges: [
+        { id: 'e_ab', type: 'polyline', sourceNodeId: 'A', targetNodeId: 'B' },
+        { id: 'e_bc', type: 'polyline', sourceNodeId: 'B', targetNodeId: 'C' },
+      ],
+    })
+
+    const group = lf.getNodeModelById('group_abc') as DynamicGroupNodeModel
+    const anchorOf = (nodeId: string, anchorId?: string) => {
+      const node = lf.getNodeModelById(nodeId)!
+      const anchors = node.getDefaultAnchor() as Array<{
+        id: string
+        x: number
+        y: number
+      }>
+      const hit = anchorId ? anchors.find((a) => a.id === anchorId) : anchors[0]
+      return hit ? { x: hit.x, y: hit.y } : { x: node.x, y: node.y }
+    }
+    const endpointDrift = (edgeId: string) => {
+      const edge = lf.getEdgeModelById(edgeId)!
+      const src = anchorOf(edge.sourceNodeId, edge.sourceAnchorId)
+      const tgt = anchorOf(edge.targetNodeId, edge.targetAnchorId)
+      return {
+        start: Math.hypot(edge.startPoint.x - src.x, edge.startPoint.y - src.y),
+        end: Math.hypot(edge.endPoint.x - tgt.x, edge.endPoint.y - tgt.y),
+      }
+    }
+
+    group.toggleCollapse(true)
+    lf.graphModel.moveNodes(['group_abc'], 150, 80, true)
+    group.toggleCollapse(false)
+
+    const afterExpand = endpointDrift('e_ab')
+    expect(afterExpand.end).toBeLessThan(1)
+    expect(endpointDrift('e_bc').start).toBeLessThan(1)
+
+    lf.graphModel.moveNodes(['group_abc'], 100, 60, true)
+
+    expect(endpointDrift('e_ab').end).toBeLessThan(1)
+    expect(endpointDrift('e_bc').start).toBeLessThan(1)
+  })
+})
